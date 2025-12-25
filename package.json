@@ -1,0 +1,19 @@
+{
+  "name": "explain_this_backend",
+  "version": "1.0.4",
+  "description": "Explain This backend (Express + OpenAI) with UX-friendly plain text output + key health",
+  "main": "server.cjs",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "openai": "^4.0.0"
+  }
+}
