@@ -26,6 +26,7 @@ INSTRUCTIES (belangrijk):
 - Gebruik alleen platte tekst.
 - Antwoord altijd in het Nederlands.
 - Schrijf kort, duidelijk, professioneel.
+- Gebruik GEEN opsommingen met '-' of '•'. Schrijf in korte alinea's; nieuwe regels zijn oké, maar zonder bullets.
 - Gebruik exact deze kopjes (allemaal met hoofdletters en een dubbele punt):
 SAMENVATTING:
 BELANGRIJKSTE PUNTEN:
