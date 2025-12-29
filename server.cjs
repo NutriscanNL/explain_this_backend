@@ -77,13 +77,12 @@ ${text}`;
 });
 
 
-
 app.post("/explain_v2", async (req, res) => {
   try {
     const body = req.body || {};
     const text = typeof body.text === "string" ? body.text : "";
     const context = typeof body.context === "string" ? body.context : "";
-    const mode = typeof body.mode === "string" ? body.mode : "default"; // future: "legal"
+    const mode = (typeof body.mode === "string" && body.mode.trim()) ? body.mode.trim() : "default";
 
     if (text.trim().length < 10) {
       return res.status(400).json({ error: "TEXT_TOO_SHORT" });
@@ -96,187 +95,105 @@ app.post("/explain_v2", async (req, res) => {
 
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-    const system = `You are Explain This, a privacy-first document explainer.
-Return ONLY valid JSON (no markdown, no code fences).
-Be cautious: do not give legal advice. Use uncertainty language.`;
+    // V2: return structured JSON (no markdown). Works for ANY letter/text.
+    const prompt = `Je bent "Explain This": je legt moeilijke documenten uit in eenvoudige, menselijke taal.
 
-    const schemaHint = `Return JSON with exactly these top-level keys:
+BELANGRIJK:
+- Antwoord ALLEEN met geldige JSON.
+- GEEN markdown, geen codefences, geen uitleg buiten JSON.
+- Taal: Nederlands.
+- Wees feitelijk: als iets onzeker is, schrijf dat als "onzeker" in de tekst.
+
+JSON SCHEMA (exact deze keys):
 {
-  "docType": "general_letter|invoice|fine|contract|medical|insurance|bank|employment|education|collections|government|other",
-  "intent": "inform|request_action|warning|confirmation|decision|invitation|payment_request|other",
-  "summary": "3-5 short sentences for the user (Dutch).",
-  "key_points": ["bullet 1", "bullet 2", "bullet 3"],
-  "actions": [
-    {"label":"...", "deadline": null, "risk":"low|medium|high", "details":"..."}
-  ],
+  "mode": "default" of "legal",
+  "docType": "manual" | "invoice" | "letter" | "contract" | "fine" | "other",
+  "intent": "inform" | "request_action" | "warning" | "confirmation" | "decision" | "other",
+  "summary": string (max 3 zinnen),
+  "key_points": [string, ...] (3-6 punten),
+  "actions": [{"label": string, "details": string}],
+  "what_if": [{"label": string, "details": string}],
   "extracted": {
-    "amounts": [],
-    "dates": [],
-    "deadline": null,
-    "iban": null,
-    "reference": null,
-    "contact": null,
-    "sender": null
+    "amounts": [string, ...],
+    "dates": [string, ...],
+    "iban": [string, ...],
+    "reference": [string, ...],
+    "contacts": [string, ...]
   },
   "legal": {
-    "risk_level": "low|medium|high",
-    "notes": ["..."],
-    "disclaimer": "..."
+    "impact_level": "low" | "medium" | "high",
+    "disclaimer": string
   }
-}`;
+}
 
-    const user = `Document text:
-${text}
+REGELS:
+- "docType": kies het best passende type. Als het een handleiding/instructie is: "manual". Boete/CJIB: "fine". Betalingsverzoek/factuur: "invoice". Voorwaarden/overeenkomst: "contract". Anders: "letter" of "other".
+- "intent": wat wil de afzender? (inform/request_action/warning/confirmation/decision/other)
+- "actions": 2-4 items. Als er deadlines/bedragen zijn, benoem ze in details. Als niet zeker: zeg "onzeker".
+- "what_if": 2-3 items. Maak ze passend bij docType.
+- "extracted": alleen dingen die letterlijk in tekst staan; anders lege arrays.
+- "legal": als mode == "legal": impact_level + juridisch-voorzichtige disclaimer. Als mode == "default": zet impact_level toch, maar keep disclaimer neutraal ("Geen juridisch advies").
 
-Extra context (optional):
+Context (documenttype / situatie):
 ${context}
 
-Mode: ${mode}
-
-${schemaHint}`;
+Tekst uit document:
+${text}`.trim();
 
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model,
+        messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user }
-        ],
       }),
     });
 
+    if (!r.ok) {
+      const detail = await r.text().catch(() => "");
+      return res.status(500).json({ error: "OPENAI_ERROR", detail });
+    }
+
     const data = await r.json();
     const content = data?.choices?.[0]?.message?.content;
-
     if (!content) {
-      return res.status(502).json({ error: "OPENAI_EMPTY_RESPONSE", raw: data });
+      return res.status(500).json({ error: "OPENAI_EMPTY_RESPONSE", raw: data });
     }
 
-    function stripFences(s) {
-      return String(s)
-        .trim()
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/```$/i, "")
-        .trim();
-    }
+    // Clean possible accidental code fences (defensive)
+    const cleaned = String(content).trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
 
-    function safeJsonParse(s) {
-      try {
-        return JSON.parse(stripFences(s));
-      } catch (_) {
-        // try to extract first {...} block
-        const m = stripFences(s).match(/\{[\s\S]*\}$/);
-        if (m) {
-          try { return JSON.parse(m[0]); } catch (_) {}
-        }
-        return null;
-      }
-    }
-
-    function uniq(arr) {
-      const seen = new Set();
-      return (arr || []).filter((x) => {
-        const k = String(x);
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
-    }
-
-    function extractFacts(t) {
-      const s = String(t || "");
-      const amounts = uniq((s.match(/€\s*\d{1,3}(?:[.\s]\d{3})*(?:[,\.\s]\d{2})?/g) || []).map(x => x.replace(/\s+/g, " ").trim()));
-      const ibanM = s.match(/\bNL\d{2}\s?[A-Z]{4}\s?\d{4}\s?\d{2}\s?\d{2}\s?\d{2}\b/i);
-      const iban = ibanM ? ibanM[0].replace(/\s+/g, "").toUpperCase() : null;
-
-      const month = "(januari|februari|maart|april|mei|juni|juli|augustus|september|oktober|november|december)";
-      const dateWords = new RegExp(`\\b\\d{1,2}\\s+${month}\\s+\\d{4}\\b`, "ig");
-      const dates = uniq((s.match(dateWords) || []).map(x => x.trim()));
-      const dateNums = uniq((s.match(/\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b/g) || []).map(x => x.trim()));
-      const allDates = uniq([...dates, ...dateNums]);
-
-      // naive deadline: first date that appears near betaal/voor/vóór
-      let deadline = null;
-      for (const d of allDates) {
-        const idx = s.toLowerCase().indexOf(d.toLowerCase());
-        if (idx >= 0) {
-          const w = s.substring(Math.max(0, idx - 50), Math.min(s.length, idx + d.length + 50)).toLowerCase();
-          if (w.includes("betaal") || w.includes("vóór") || w.includes("voor ")) {
-            deadline = d;
-            break;
-          }
-        }
-      }
-
-      // reference: look for 'betalingskenmerk' or 'kenmerk'
-      let reference = null;
-      const refM =
-        s.match(/betalingskenmerk\s*[:\-]?\s*([0-9 ]{6,})/i) ||
-        s.match(/\bkenmerk\s*[:\-]?\s*([A-Z0-9\- ]{6,})/i) ||
-        s.match(/\bzaaknummer\s*[:\-]?\s*([A-Z0-9\- ]{6,})/i);
-      if (refM) reference = String(refM[1]).trim().replace(/\s+/g, " ");
-
-      return { amounts, dates: allDates, deadline, iban, reference };
-    }
-
-    const parsed = safeJsonParse(content);
-    const extracted = extractFacts(text);
-
-    if (!parsed || typeof parsed !== "object") {
-      // fallback: return minimal structured response
-      return res.json({
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (_) {
+      // Fallback: wrap in minimal object so the app still works
+      parsed = {
+        mode,
         docType: "other",
-        intent: "inform",
-        summary: "Ik heb je tekst ontvangen, maar kon de analyse niet betrouwbaar structureren. Bekijk de originele brief voor details.",
+        intent: "other",
+        summary: cleaned.slice(0, 420),
         key_points: [],
-        actions: [
-          { label: "Lees de originele brief", deadline: extracted.deadline || null, risk: "medium", details: "Controleer wat er precies gevraagd wordt en of er een deadline is." }
-        ],
-        extracted: {
-          amounts: extracted.amounts,
-          dates: extracted.dates,
-          deadline: extracted.deadline,
-          iban: extracted.iban,
-          reference: extracted.reference,
-          contact: null,
-          sender: null
-        },
-        legal: {
-          risk_level: "medium",
-          notes: ["De analyse kon niet betrouwbaar worden geformatteerd."],
-          disclaimer: "Dit is een vereenvoudigde uitleg. De originele brief is juridisch leidend. Geen juridisch advies."
-        },
-        raw_text: content
-      });
+        actions: [],
+        what_if: [],
+        extracted: { amounts: [], dates: [], iban: [], reference: [], contacts: [] },
+        legal: { impact_level: "low", disclaimer: "Geen juridisch advies. Controleer altijd het originele document." },
+      };
     }
 
-    // normalize + merge extracted facts
-    const out = parsed;
-    out.extracted = out.extracted && typeof out.extracted === "object" ? out.extracted : {};
-    out.extracted.amounts = uniq([...(out.extracted.amounts || []), ...extracted.amounts]);
-    out.extracted.dates = uniq([...(out.extracted.dates || []), ...extracted.dates]);
-    out.extracted.deadline = out.extracted.deadline || extracted.deadline || null;
-    out.extracted.iban = out.extracted.iban || extracted.iban || null;
-    out.extracted.reference = out.extracted.reference || extracted.reference || null;
+    // Ensure mode is echoed
+    parsed.mode = mode;
 
-    // guarantee disclaimer
-    out.legal = out.legal && typeof out.legal === "object" ? out.legal : {};
-    out.legal.disclaimer =
-      out.legal.disclaimer ||
-      "Dit is een vereenvoudigde uitleg. De originele brief is juridisch leidend. Geen juridisch advies.";
-
-    return res.json(out);
+    res.json({ result: parsed });
   } catch (e) {
     res.status(500).json({ error: "AI_ERROR", detail: e?.message || String(e) });
   }
 });
+
 
 app.get("/health", (_, res) => {
   res.json({
