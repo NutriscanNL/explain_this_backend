@@ -13,6 +13,11 @@ app.post("/explain_v2", async (req, res) => {
     const text = typeof body.text === "string" ? body.text : "";
     const context = typeof body.context === "string" ? body.context : "";
     const mode = body.mode === "legal" ? "legal" : "default";
+    const outputLanguageRaw = typeof body.output_language === "string" ? body.output_language.trim() : "";
+    const outputLanguageCode = outputLanguageRaw ? outputLanguageRaw.toLowerCase() : "nl";
+    const langNameMap = { nl: "Nederlands", en: "Engels", de: "Duits", fr: "Frans", es: "Spaans", sv: "Zweeds", tr: "Turks", ar: "Arabisch", uk: "Oekraïens", pl: "Pools" };
+    const outputLanguage = langNameMap[outputLanguageCode] || outputLanguageRaw || "Nederlands";
+
 
     if (text.trim().length < 10) {
       return res.status(400).json({ error: "TEXT_TOO_SHORT" });
@@ -29,8 +34,9 @@ app.post("/explain_v2", async (req, res) => {
     const prompt = `
 Je bent een rustige, uiterst duidelijke uitleg-assistent voor gescande teksten/briefstukken.
 
-TAAL: Nederlands (eenvoudig, menselijk, geen jargon).
-BELANGRIJK: Geef ALLEEN geldige JSON terug. Geen markdown. Geen uitleg buiten JSON.
+TAAL: Schrijf alle tekstvelden in deze taal: ${outputLanguage}. (Eenvoudig, menselijk, geen jargon).
+BELANGRIJK: Geef ALLEEN geldige JSON terug. Geen markdown.
+- Output taal: ${outputLanguage}. Geen uitleg buiten JSON.
 
 Doel:
 - Werkt voor ELKE tekst (brief, e-mail, handleiding, contract, boete, factuur).

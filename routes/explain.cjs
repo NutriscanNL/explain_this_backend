@@ -4,7 +4,7 @@ const { explainText } = require("../services/ai_explain.cjs");
 
 router.post("/explain", async (req, res) => {
   try {
-    const { text, context } = req.body;
+    const { text, context, output_language } = req.body;
 
     if (!text || typeof text !== "string") {
       return res.status(400).json({
