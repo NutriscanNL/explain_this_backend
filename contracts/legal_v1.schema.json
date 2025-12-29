@@ -1,0 +1,275 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://explain-this.app/contracts/legal_v1.schema.json",
+  "title": "Explain This Pro Legal Contract v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "version",
+    "mode",
+    "doc_type",
+    "goal",
+    "legal_type",
+    "title_guess",
+    "summary",
+    "key_points",
+    "actions",
+    "extracted",
+    "legal"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "mode": {
+      "type": "string",
+      "const": "legal"
+    },
+    "doc_type": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "invoice",
+        "letter",
+        "contract",
+        "fine",
+        "other"
+      ]
+    },
+    "goal": {
+      "type": "string",
+      "enum": [
+        "inform",
+        "request_action",
+        "warning",
+        "confirmation",
+        "rejection",
+        "invitation",
+        "unknown"
+      ]
+    },
+    "legal_type": {
+      "type": "string",
+      "enum": [
+        "huur",
+        "arbeid",
+        "incasso",
+        "bezwaar",
+        "contract",
+        "aansprakelijkheid",
+        "overig"
+      ]
+    },
+    "title_guess": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "summary": {
+      "type": "string"
+    },
+    "key_points": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 8
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "details",
+          "deadline"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "details": {
+            "type": "string"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "extracted": {
+      "type": "object",
+      "required": [
+        "amounts",
+        "dates",
+        "iban",
+        "reference",
+        "organization",
+        "recipient_guess"
+      ],
+      "properties": {
+        "amounts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3
+        },
+        "dates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3
+        },
+        "iban": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recipient_guess": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "legal": {
+      "type": "object",
+      "required": [
+        "impact_level",
+        "assessment",
+        "assessment_reason",
+        "uncertainties",
+        "missing_info",
+        "arguments_for",
+        "arguments_against",
+        "reply_draft",
+        "disclaimer"
+      ],
+      "properties": {
+        "impact_level": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "assessment": {
+          "type": "string",
+          "enum": [
+            "strong",
+            "mixed",
+            "weak"
+          ]
+        },
+        "assessment_reason": {
+          "type": "string"
+        },
+        "uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8
+        },
+        "missing_info": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12
+        },
+        "arguments_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12
+        },
+        "arguments_against": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12
+        },
+        "reply_draft": {
+          "type": "object",
+          "required": [
+            "tone",
+            "subject",
+            "body",
+            "notes"
+          ],
+          "properties": {
+            "tone": {
+              "type": "string",
+              "enum": [
+                "neutral",
+                "friendly",
+                "firm"
+              ]
+            },
+            "subject": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 10
+            }
+          },
+          "additionalProperties": true
+        },
+        "disclaimer": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

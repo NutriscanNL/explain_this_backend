@@ -145,6 +145,182 @@ ${text}
 });
 
 
+
+
+// ------------------------------
+// Contracts (JSON Schemas) – for frontend/back-end agreement
+// ------------------------------
+const fs = require("fs");
+const path = require("path");
+
+function sendJsonFile(res, relPath) {
+  try {
+    const p = path.join(__dirname, relPath);
+    const raw = fs.readFileSync(p, "utf8");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.status(200).send(raw);
+  } catch (e) {
+    res.status(404).json({ error: "SCHEMA_NOT_FOUND" });
+  }
+}
+
+app.get("/contract/standard_v2", (req, res) => sendJsonFile(res, "contracts/standard_v2.schema.json"));
+app.get("/contract/legal_v1", (req, res) => sendJsonFile(res, "contracts/legal_v1.schema.json"));
+
+
+// ------------------------------
+// Pro Legal endpoint – separate route (does NOT change /explain_v2)
+// ------------------------------
+// Body:
+// {
+//   "text": "scanned OCR text",
+//   "context": "optional user context",
+//   "legal_type": "huur|arbeid|incasso|bezwaar|contract|aansprakelijkheid|overig",
+//   "tone": "neutral|friendly|firm",
+//   "output_language": "nl|en|... (optional)"
+// }
+app.post("/explain_legal_v1", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const text = typeof body.text === "string" ? body.text : "";
+    const context = typeof body.context === "string" ? body.context : "";
+    const legalType = typeof body.legal_type === "string" ? body.legal_type : "overig";
+    const tone = body.tone === "friendly" || body.tone === "firm" ? body.tone : "neutral";
+    const outputLanguage = typeof body.output_language === "string" && body.output_language.trim() ? body.output_language.trim() : "nl";
+
+    if (!text || text.trim().length < 20) {
+      return res.status(400).json({ error: "TEXT_TOO_SHORT" });
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "OPENAI_API_KEY_MISSING" });
+    }
+
+    const model = process.env.OPENAI_LEGAL_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+    const prompt = `
+Je bent Explain This – Pro Legal (geen juridisch advies, geen garanties).
+Jouw taak: lees de TEKST en geef een juridische-voorzichtig geformuleerde analyse in JSON.
+
+BELANGRIJK:
+- Output is ALLEEN geldige JSON (geen markdown, geen uitlegtekst eromheen).
+- Geen "win percentage". Gebruik assessment: strong|mixed|weak met uitleg.
+- Wees concreet en bondig. Vermijd dubbelingen.
+- Max 3 items per extracted array (amounts/dates/iban).
+- Kies doc_type uit EXACT: manual|invoice|letter|contract|fine|other
+- Kies goal uit EXACT: inform|request_action|warning|confirmation|rejection|invitation|unknown
+- impact_level: low|medium|high
+- assessment: strong|mixed|weak
+- tone: neutral|friendly|firm
+- output_language: schrijf reply_draft in deze taal: ${outputLanguage}
+
+Geef dit JSON schema terug:
+
+{
+  "version": 1,
+  "mode": "legal",
+  "doc_type": "manual|invoice|letter|contract|fine|other",
+  "goal": "inform|request_action|warning|confirmation|rejection|invitation|unknown",
+  "legal_type": "huur|arbeid|incasso|bezwaar|contract|aansprakelijkheid|overig",
+  "title_guess": "korte titel (max 60 tekens)",
+  "summary": "max 2-3 zinnen, kort en duidelijk",
+  "key_points": ["max 5 bullets, geen herhaling"],
+  "actions": [
+    {
+      "label": "korte actie (max 40 tekens)",
+      "details": "1 zin uitleg",
+      "deadline": "datum of null"
+    }
+  ],
+  "extracted": {
+    "amounts": [],
+    "dates": [],
+    "iban": [],
+    "reference": null,
+    "organization": null,
+    "recipient_guess": null
+  },
+  "legal": {
+    "impact_level": "low|medium|high",
+    "assessment": "strong|mixed|weak",
+    "assessment_reason": "2-4 zinnen: waarom sterk/gemengd/zwak + onzekerheden",
+    "uncertainties": ["max 5 punten: wat is onzeker/afhankelijk"],
+    "missing_info": ["max 6 punten: welke info ontbreekt"],
+    "arguments_for": ["max 6 punten: argumenten die je kunt aanvoeren (voorzichtig)"],
+    "arguments_against": ["max 6 punten: tegenargumenten / risico's"],
+    "reply_draft": {
+      "tone": "neutral|friendly|firm",
+      "subject": "onderwerpregel",
+      "body": "volledige concept-brief (zonder placeholders als <...>, gebruik [ ] indien nodig)",
+      "notes": ["max 4 korte notities wat de gebruiker moet invullen/aanpassen"]
+    },
+    "disclaimer": "1 zin: geen juridisch advies, originele tekst leidend"
+  }
+}
+
+CONTEXT:
+${context}
+
+LEGAL_TYPE:
+${legalType}
+
+TONE:
+${tone}
+
+TEKST:
+${text}
+`.trim();
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+      }),
+    });
+
+    const data = await r.json();
+    const content = data?.choices?.[0]?.message?.content;
+
+    if (!content) {
+      return res.status(502).json({ error: "OPENAI_EMPTY_RESPONSE", raw: data });
+    }
+
+    // Parse JSON strictly, with small repair if wrapped
+    let parsed = null;
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      const first = content.indexOf("{");
+      const last = content.lastIndexOf("}");
+      if (first !== -1 && last !== -1 && last > first) {
+        const slice = content.slice(first, last + 1);
+        try {
+          parsed = JSON.parse(slice);
+        } catch (e2) {
+          return res.status(502).json({ error: "OPENAI_JSON_PARSE_FAILED", detail: e2?.message || String(e2), raw: content });
+        }
+      } else {
+        return res.status(502).json({ error: "OPENAI_JSON_PARSE_FAILED", detail: e?.message || String(e), raw: content });
+      }
+    }
+
+    if (!parsed || typeof parsed !== "object") {
+      return res.status(502).json({ error: "OPENAI_JSON_INVALID", raw: parsed });
+    }
+
+    return res.json(parsed);
+  } catch (e) {
+    return res.status(500).json({ error: "SERVER_ERROR", detail: e?.message || String(e) });
+  }
+});
+
 app.post("/explain", async (req, res) => {
   try {
     const body = req.body || {};

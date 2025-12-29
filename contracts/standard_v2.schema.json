@@ -1,0 +1,180 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://explain-this.app/contracts/standard_v2.schema.json",
+  "title": "Explain This Standard Contract v2",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "version",
+    "mode",
+    "doc_type",
+    "goal",
+    "title_guess",
+    "summary",
+    "key_points",
+    "actions",
+    "extracted",
+    "legal"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 2
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "default",
+        "legal"
+      ]
+    },
+    "doc_type": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "invoice",
+        "letter",
+        "contract",
+        "fine",
+        "other"
+      ]
+    },
+    "goal": {
+      "type": "string",
+      "enum": [
+        "inform",
+        "request_action",
+        "warning",
+        "confirmation",
+        "rejection",
+        "invitation",
+        "unknown"
+      ]
+    },
+    "title_guess": {
+      "type": "string",
+      "maxLength": 60
+    },
+    "summary": {
+      "type": "string"
+    },
+    "key_points": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 0,
+      "maxItems": 10
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "details",
+          "deadline"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "details": {
+            "type": "string"
+          },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "extracted": {
+      "type": "object",
+      "required": [
+        "amounts",
+        "dates",
+        "iban",
+        "reference",
+        "organization"
+      ],
+      "properties": {
+        "amounts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "iban": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "organization": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "legal": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "impact_level",
+            "disclaimer"
+          ],
+          "properties": {
+            "impact_level": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            "disclaimer": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    }
+  }
+}
