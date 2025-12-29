@@ -16,21 +16,15 @@ function getClient() {
   return new OpenAI({ apiKey: getApiKey() });
 }
 
-async function explainText({ text, context, outputLanguage }) {
+async function explainText({ text, context }) {
   // ✅ UX FIX: Forceer nette secties, géén Markdown
-  
-  const langRaw = typeof outputLanguage === "string" ? outputLanguage.trim() : "";
-  const code = langRaw ? langRaw.toLowerCase() : "nl";
-  const langNameMap = { nl: "Nederlands", en: "Engels", de: "Duits", fr: "Frans", es: "Spaans", sv: "Zweeds", tr: "Turks", ar: "Arabisch", uk: "Oekraïens", pl: "Pools" };
-  const lang = langNameMap[code] || langRaw || "Nederlands";
-
-const prompt = `
+  const prompt = `
 Je bent "Explain This": je legt moeilijke documenten uit in eenvoudige, menselijke taal.
 
 INSTRUCTIES (belangrijk):
 - Gebruik GEEN markdown. Dus: geen **, geen ##, geen backticks.
 - Gebruik alleen platte tekst.
-- Antwoord in deze taal: ${lang}.
+- Antwoord altijd in het Nederlands.
 - Schrijf kort, duidelijk, professioneel.
 - Gebruik GEEN opsommingen met '-' of '•'. Schrijf in korte alinea's; nieuwe regels zijn oké, maar zonder bullets.
 - Gebruik exact deze kopjes (allemaal met hoofdletters en een dubbele punt):
