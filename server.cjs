@@ -6,6 +6,145 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 
+
+app.post("/explain_v2", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const text = typeof body.text === "string" ? body.text : "";
+    const context = typeof body.context === "string" ? body.context : "";
+    const mode = body.mode === "legal" ? "legal" : "default";
+
+    if (text.trim().length < 10) {
+      return res.status(400).json({ error: "TEXT_TOO_SHORT" });
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "OPENAI_KEY_MISSING" });
+    }
+
+    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+    // We keep prompt strict + JSON-only to simplify frontend parsing.
+    const prompt = `
+Je bent een rustige, uiterst duidelijke uitleg-assistent voor gescande teksten/briefstukken.
+
+TAAL: Nederlands (eenvoudig, menselijk, geen jargon).
+BELANGRIJK: Geef ALLEEN geldige JSON terug. Geen markdown. Geen uitleg buiten JSON.
+
+Doel:
+- Werkt voor ELKE tekst (brief, e-mail, handleiding, contract, boete, factuur).
+- Geef altijd een bruikbare samenvatting + kernpunten + acties, ook als er weinig feiten te vinden zijn.
+- Extractie (bedrag/datum/IBAN/kenmerk) is optioneel: alleen als het echt in de tekst staat.
+
+MODE:
+- default: geen juridische stelligheid, geen "risico" taal.
+- legal: extra voorzichtig + duidelijk "geen juridisch advies" disclaimer en een impact_level (low/medium/high).
+
+Kies doc_type uit EXACT deze waarden:
+manual | invoice | letter | contract | fine | other
+
+Kies goal uit EXACT deze waarden:
+inform | request_action | warning | confirmation | rejection | invitation | unknown
+
+Geef dit JSON schema terug:
+
+{
+  "version": 2,
+  "mode": "${mode}",
+  "doc_type": "manual|invoice|letter|contract|fine|other",
+  "goal": "inform|request_action|warning|confirmation|rejection|invitation|unknown",
+  "title_guess": "korte titel (max 60 tekens)",
+  "summary": "max 2-3 zinnen, kort en duidelijk",
+  "key_points": ["3-6 bullets, geen herhaling"],
+  "actions": [
+    {
+      "label": "korte actie (max 40 tekens)",
+      "details": "1 zin uitleg",
+      "deadline": "datum of null"
+    }
+  ],
+  "what_if": [
+    {
+      "if": "Als je niets doet…",
+      "then": "kort gevolg (zonder juridisch advies)"
+    }
+  ],
+  "extracted": {
+    "amounts": [],
+    "dates": [],
+    "iban": [],
+    "reference": null,
+    "organization": null
+  },
+  "legal": null
+}
+
+Als mode = "legal", zet legal op:
+{
+  "impact_level": "low|medium|high",
+  "disclaimer": "Dit is geen juridisch advies..."
+}
+(en gebruik voorzichtige taal: 'mogelijk', 'vaak', 'kan').
+
+CONTEXT:
+${context}
+
+TEKST:
+${text}
+`.trim();
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+      }),
+    });
+
+    const data = await r.json();
+    const content = data?.choices?.[0]?.message?.content;
+
+    if (!content) {
+      return res.status(502).json({ error: "OPENAI_EMPTY_RESPONSE", raw: data });
+    }
+
+    // Parse JSON strictly, with a small repair attempt if model wrapped text.
+    let parsed = null;
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      const first = content.indexOf("{");
+      const last = content.lastIndexOf("}");
+      if (first !== -1 && last !== -1 && last > first) {
+        const slice = content.slice(first, last + 1);
+        try {
+          parsed = JSON.parse(slice);
+        } catch (e2) {
+          return res.status(502).json({ error: "OPENAI_JSON_PARSE_FAILED", detail: e2?.message || String(e2), raw: content });
+        }
+      } else {
+        return res.status(502).json({ error: "OPENAI_JSON_PARSE_FAILED", detail: e?.message || String(e), raw: content });
+      }
+    }
+
+    // Minimal shape guard
+    if (!parsed || typeof parsed !== "object") {
+      return res.status(502).json({ error: "OPENAI_JSON_INVALID", raw: parsed });
+    }
+
+    return res.json(parsed);
+  } catch (e) {
+    res.status(500).json({ error: "AI_ERROR", detail: e?.message || String(e) });
+  }
+});
+
+
 app.post("/explain", async (req, res) => {
   try {
     const body = req.body || {};
@@ -75,125 +214,6 @@ ${text}`;
     res.status(500).json({ error: "AI_ERROR", detail: e?.message || String(e) });
   }
 });
-
-
-app.post("/explain_v2", async (req, res) => {
-  try {
-    const body = req.body || {};
-    const text = typeof body.text === "string" ? body.text : "";
-    const context = typeof body.context === "string" ? body.context : "";
-    const mode = (typeof body.mode === "string" && body.mode.trim()) ? body.mode.trim() : "default";
-
-    if (text.trim().length < 10) {
-      return res.status(400).json({ error: "TEXT_TOO_SHORT" });
-    }
-
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "OPENAI_KEY_MISSING" });
-    }
-
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
-    // V2: return structured JSON (no markdown). Works for ANY letter/text.
-    const prompt = `Je bent "Explain This": je legt moeilijke documenten uit in eenvoudige, menselijke taal.
-
-BELANGRIJK:
-- Antwoord ALLEEN met geldige JSON.
-- GEEN markdown, geen codefences, geen uitleg buiten JSON.
-- Taal: Nederlands.
-- Wees feitelijk: als iets onzeker is, schrijf dat als "onzeker" in de tekst.
-
-JSON SCHEMA (exact deze keys):
-{
-  "mode": "default" of "legal",
-  "docType": "manual" | "invoice" | "letter" | "contract" | "fine" | "other",
-  "intent": "inform" | "request_action" | "warning" | "confirmation" | "decision" | "other",
-  "summary": string (max 3 zinnen),
-  "key_points": [string, ...] (3-6 punten),
-  "actions": [{"label": string, "details": string}],
-  "what_if": [{"label": string, "details": string}],
-  "extracted": {
-    "amounts": [string, ...],
-    "dates": [string, ...],
-    "iban": [string, ...],
-    "reference": [string, ...],
-    "contacts": [string, ...]
-  },
-  "legal": {
-    "impact_level": "low" | "medium" | "high",
-    "disclaimer": string
-  }
-}
-
-REGELS:
-- "docType": kies het best passende type. Als het een handleiding/instructie is: "manual". Boete/CJIB: "fine". Betalingsverzoek/factuur: "invoice". Voorwaarden/overeenkomst: "contract". Anders: "letter" of "other".
-- "intent": wat wil de afzender? (inform/request_action/warning/confirmation/decision/other)
-- "actions": 2-4 items. Als er deadlines/bedragen zijn, benoem ze in details. Als niet zeker: zeg "onzeker".
-- "what_if": 2-3 items. Maak ze passend bij docType.
-- "extracted": alleen dingen die letterlijk in tekst staan; anders lege arrays.
-- "legal": als mode == "legal": impact_level + juridisch-voorzichtige disclaimer. Als mode == "default": zet impact_level toch, maar keep disclaimer neutraal ("Geen juridisch advies").
-
-Context (documenttype / situatie):
-${context}
-
-Tekst uit document:
-${text}`.trim();
-
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2,
-      }),
-    });
-
-    if (!r.ok) {
-      const detail = await r.text().catch(() => "");
-      return res.status(500).json({ error: "OPENAI_ERROR", detail });
-    }
-
-    const data = await r.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (!content) {
-      return res.status(500).json({ error: "OPENAI_EMPTY_RESPONSE", raw: data });
-    }
-
-    // Clean possible accidental code fences (defensive)
-    const cleaned = String(content).trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
-
-    let parsed;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (_) {
-      // Fallback: wrap in minimal object so the app still works
-      parsed = {
-        mode,
-        docType: "other",
-        intent: "other",
-        summary: cleaned.slice(0, 420),
-        key_points: [],
-        actions: [],
-        what_if: [],
-        extracted: { amounts: [], dates: [], iban: [], reference: [], contacts: [] },
-        legal: { impact_level: "low", disclaimer: "Geen juridisch advies. Controleer altijd het originele document." },
-      };
-    }
-
-    // Ensure mode is echoed
-    parsed.mode = mode;
-
-    res.json({ result: parsed });
-  } catch (e) {
-    res.status(500).json({ error: "AI_ERROR", detail: e?.message || String(e) });
-  }
-});
-
 
 app.get("/health", (_, res) => {
   res.json({
